@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_mjpeg/flutter_mjpeg.dart';
 import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
 
 void main() {
   runApp(MyApp());
@@ -13,6 +14,8 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> {
   bool _isFullScreen = false; // Pour savoir si on est en plein écran
+  String _selectedWeather = 'Normal'; // Option par défaut
+  String _streamUrl = 'http://192.168.4.1:81/stream'; // URL du flux vidéo
 
   // 🔄 Bascule entre le mode plein écran et normal
   void _toggleFullScreen() {
@@ -33,6 +36,40 @@ class _MyAppState extends State<MyApp> {
         DeviceOrientation.portraitDown,
       ]);
     }
+  }
+
+  // Fonction pour envoyer une requête à la caméra selon l'environnement
+  Future<void> _adjustCameraSettings() async {
+    String url = "http://192.168.4.1/control";
+    Map<String, String> queryParams = {};
+
+    // Adapter les paramètres en fonction de la météo
+    switch (_selectedWeather) {
+      case 'Ensoleillé':
+        queryParams = {"var": "wb", "val": "2"}; // Balance des blancs pour l'ensoleillement
+        _streamUrl = 'http://192.168.4.1:81/stream?env=sunny'; // URL spécifique si ensoleillé
+        break;
+      case 'Nuageux':
+        queryParams = {"var": "wb", "val": "1"}; // Balance des blancs pour nuageux
+        _streamUrl = 'http://192.168.4.1:81/stream?env=cloudy'; // URL spécifique si nuageux
+        break;
+      case 'Normal':
+        queryParams = {"var": "wb", "val": "0"}; // Réglages par défaut
+        _streamUrl = 'http://192.168.4.1:81/stream?env=normal'; // URL par défaut
+        break;
+    }
+
+    // Crée une nouvelle URL avec les paramètres
+    final Uri uri = Uri.parse(url).replace(queryParameters: queryParams);
+
+    // Envoi de la requête à la caméra
+    await http.get(uri);
+
+    // Redémarre le flux vidéo avec la nouvelle URL après la mise à jour
+    setState(() {
+      // Met à jour le flux vidéo avec la nouvelle URL
+      _streamUrl = _streamUrl;
+    });
   }
 
   @override
@@ -67,7 +104,7 @@ class _MyAppState extends State<MyApp> {
               height: screenHeight / 3,
               color: Colors.black,
               child: Mjpeg(
-                stream: 'http://192.168.4.1:81/stream',
+                stream: _streamUrl,
                 isLive: true,
               ),
             ),
@@ -81,6 +118,11 @@ class _MyAppState extends State<MyApp> {
             ),
           ],
         ),
+
+        SizedBox(height: 10),
+
+        // 🛑 Section météo (sélecteur déroulant)
+        _buildWeatherSelection(),
 
         SizedBox(height: 10),
 
@@ -113,6 +155,41 @@ class _MyAppState extends State<MyApp> {
     );
   }
 
+  // Widget pour le sélecteur de météo
+  Widget _buildWeatherSelection() {
+    return Container(
+      margin: EdgeInsets.symmetric(horizontal: 16),
+      padding: EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.blueGrey[800],
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text("Sélectionner l'environnement météo", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          SizedBox(height: 12),
+          DropdownButton<String>(
+            value: _selectedWeather,
+            onChanged: (String? newValue) {
+              setState(() {
+                _selectedWeather = newValue!;
+                _adjustCameraSettings(); // Mettre à jour la caméra dès que l'option change
+              });
+            },
+            items: <String>['Normal', 'Ensoleillé', 'Nuageux']
+                .map<DropdownMenuItem<String>>((String value) {
+              return DropdownMenuItem<String>(
+                value: value,
+                child: Text(value),
+              );
+            }).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+
   // 🔄 Mode plein écran (paysage) avec un bouton pour quitter le mode plein écran
   Widget _buildFullScreenVideo() {
     return GestureDetector(
@@ -121,7 +198,7 @@ class _MyAppState extends State<MyApp> {
         children: [
           Center(
             child: Mjpeg(
-              stream: 'http://192.168.4.1:81/stream',
+              stream: _streamUrl,
               isLive: true,
             ),
           ),
