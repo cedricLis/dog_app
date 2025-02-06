@@ -14,8 +14,9 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> {
   bool _isFullScreen = false; // Pour savoir si on est en plein écran
-  String _selectedWeather = 'Normal'; // Option par défaut
-  String _streamUrl = 'http://192.168.4.1:81/stream'; // URL du flux vidéo
+  bool _isWeatherPanelOpen = false;
+  String _selectedWeather = 'Auto';
+  String _streamUrl = 'http://192.168.4.1:81/stream';
 
   // 🔄 Bascule entre le mode plein écran et normal
   void _toggleFullScreen() {
@@ -38,38 +39,28 @@ class _MyAppState extends State<MyApp> {
     }
   }
 
-  // Fonction pour envoyer une requête à la caméra selon l'environnement
   Future<void> _adjustCameraSettings() async {
     String url = "http://192.168.4.1/control";
     Map<String, String> queryParams = {};
 
-    // Adapter les paramètres en fonction de la météo
     switch (_selectedWeather) {
+      case 'Auto':
+        queryParams = {"var": "wb_mode", "val": "0"};
+        break;
       case 'Ensoleillé':
-        queryParams = {"var": "wb", "val": "2"}; // Balance des blancs pour l'ensoleillement
-        _streamUrl = 'http://192.168.4.1:81/stream?env=sunny'; // URL spécifique si ensoleillé
+        queryParams = {"var": "wb_mode", "val": "1"};
         break;
       case 'Nuageux':
-        queryParams = {"var": "wb", "val": "1"}; // Balance des blancs pour nuageux
-        _streamUrl = 'http://192.168.4.1:81/stream?env=cloudy'; // URL spécifique si nuageux
+        queryParams = {"var": "wb_mode", "val": "2"};
         break;
-      case 'Normal':
-        queryParams = {"var": "wb", "val": "0"}; // Réglages par défaut
-        _streamUrl = 'http://192.168.4.1:81/stream?env=normal'; // URL par défaut
+      case 'Intérieur':
+        queryParams = {"var": "wb_mode", "val": "3"};
         break;
     }
 
-    // Crée une nouvelle URL avec les paramètres
     final Uri uri = Uri.parse(url).replace(queryParameters: queryParams);
-
-    // Envoi de la requête à la caméra
     await http.get(uri);
-
-    // Redémarre le flux vidéo avec la nouvelle URL après la mise à jour
-    setState(() {
-      // Met à jour le flux vidéo avec la nouvelle URL
-      _streamUrl = _streamUrl;
-    });
+    setState(() {});
   }
 
   @override
@@ -86,46 +77,95 @@ class _MyAppState extends State<MyApp> {
           title: Text('Surveillance Canine 🐕‍🦺'),
           backgroundColor: Colors.blueGrey[900],
         ),
-        body: _isFullScreen
-            ? _buildFullScreenVideo()
-            : _buildNormalScreen(screenHeight),
+        body: Stack(
+          children: [
+            Column(
+              children: [
+                _buildVideoStream(),
+                if (!_isFullScreen) Expanded(child: _buildInfoPanel()),
+              ],
+            ),
+            if (_isWeatherPanelOpen) _buildWeatherPanel(),
+          ],
+        ),
       ),
     );
   }
 
-  // 🎥 Interface normale avec vidéo et infos gaz/GPS
-  Widget _buildNormalScreen(double screenHeight) {
-    return Column(
+  // 🎥 Interface vidéo avec ajustement d'écran
+  Widget _buildVideoStream() {
+    return Stack(
       children: [
-        // 📡 Flux vidéo en direct avec bouton plein écran
-        Stack(
+        // Vidéo avec un aspect ratio pour la proportion de la vidéo
+        AspectRatio(
+          aspectRatio: 16 / 9, // Garder le ratio 16:9 pour la vidéo
+          child: Mjpeg(
+            stream: _streamUrl,
+            isLive: true,
+          ),
+        ),
+        Positioned(
+          bottom: 8,
+          right: 8,
+          child: IconButton(
+            icon: Icon(Icons.fullscreen, size: _isFullScreen ? 50 : 30, color: Colors.white),
+            onPressed: _toggleFullScreen,
+          ),
+        ),
+        Positioned(
+          bottom: 8,
+          left: 8,
+          child: IconButton(
+            icon: Icon(Icons.wb_sunny, size: 30, color: Colors.white),
+            onPressed: () {
+              setState(() {
+                _isWeatherPanelOpen = !_isWeatherPanelOpen;
+              });
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  // 🎛️ Panel pour ajuster les paramètres de la caméra (météo)
+  Widget _buildWeatherPanel() {
+    return Positioned(
+      left: 10,
+      top: 100,
+      child: Container(
+        padding: EdgeInsets.all(10),
+        width: 200,
+        decoration: BoxDecoration(
+          color: Colors.blueGrey[800],
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
           children: [
-            Container(
-              height: screenHeight / 3,
-              color: Colors.black,
-              child: Mjpeg(
-                stream: _streamUrl,
-                isLive: true,
-              ),
-            ),
-            Positioned(
-              bottom: 8,
-              right: 8,
-              child: IconButton(
-                icon: Icon(Icons.fullscreen, size: 30, color: Colors.white),
-                onPressed: _toggleFullScreen,
-              ),
+            Text("Environnement", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            DropdownButton<String>(
+              value: _selectedWeather,
+              onChanged: (String? newValue) {
+                setState(() {
+                  _selectedWeather = newValue!;
+                  _adjustCameraSettings();
+                  _isWeatherPanelOpen = false;
+                });
+              },
+              items: ['Auto', 'Ensoleillé', 'Nuageux', 'Intérieur']
+                  .map((value) => DropdownMenuItem(value: value, child: Text(value)))
+                  .toList(),
             ),
           ],
         ),
+      ),
+    );
+  }
 
-        SizedBox(height: 10),
-
-        // 🛑 Section météo (sélecteur déroulant)
-        _buildWeatherSelection(),
-
-        SizedBox(height: 10),
-
+  // 📑 Infos supplémentaires en mode normal
+  Widget _buildInfoPanel() {
+    return Column(
+      children: [
         // 🛑 Section Gaz
         _buildSection(
           title: "Détection de Gaz 🛑",
@@ -138,7 +178,6 @@ class _MyAppState extends State<MyApp> {
             ],
           ),
         ),
-
         SizedBox(height: 15),
 
         // 📍 Section GPS
@@ -152,66 +191,6 @@ class _MyAppState extends State<MyApp> {
           ),
         ),
       ],
-    );
-  }
-
-  // Widget pour le sélecteur de météo
-  Widget _buildWeatherSelection() {
-    return Container(
-      margin: EdgeInsets.symmetric(horizontal: 16),
-      padding: EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.blueGrey[800],
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text("Sélectionner l'environnement météo", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-          SizedBox(height: 12),
-          DropdownButton<String>(
-            value: _selectedWeather,
-            onChanged: (String? newValue) {
-              setState(() {
-                _selectedWeather = newValue!;
-                _adjustCameraSettings(); // Mettre à jour la caméra dès que l'option change
-              });
-            },
-            items: <String>['Normal', 'Ensoleillé', 'Nuageux']
-                .map<DropdownMenuItem<String>>((String value) {
-              return DropdownMenuItem<String>(
-                value: value,
-                child: Text(value),
-              );
-            }).toList(),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // 🔄 Mode plein écran (paysage) avec un bouton pour quitter le mode plein écran
-  Widget _buildFullScreenVideo() {
-    return GestureDetector(
-      onTap: _toggleFullScreen,
-      child: Stack(
-        children: [
-          Center(
-            child: Mjpeg(
-              stream: _streamUrl,
-              isLive: true,
-            ),
-          ),
-          Positioned(
-            bottom: 30,
-            right: 20,
-            child: IconButton(
-              icon: Icon(Icons.fullscreen_exit, size: 40, color: Colors.white),
-              onPressed: _toggleFullScreen,
-            ),
-          ),
-        ],
-      ),
     );
   }
 
